@@ -118,10 +118,11 @@ class FlatMapReal(Pix):
 		self.map = GaussSmooth(self.map, fwhm, self.dx * 180.*60./np.pi , order=order)
 
 
-	def Pad(self, nxp, nyp=None):
+	def Pad(self, nxp, nyp=None, fwhm=None):
 		""" 
 		Zero-pad the present map and creates a new one with dimensions nxp (>nx), nyp (>ny) 
 		with this map at its center. 
+		- fwhm: 
 		"""
 		assert( nxp > self.nx )
 		if nyp == None:
@@ -134,7 +135,9 @@ class FlatMapReal(Pix):
 		new.map[ (nyp-self.ny)/2:(nyp+self.ny)/2, (nxp-self.nx)/2:(nxp+self.nx)/2 ]  = self.map
 		new.mask[:] = 0.
 		new.mask[ (nyp-self.ny)/2:(nyp+self.ny)/2, (nxp-self.nx)/2:(nxp+self.nx)/2 ] = self.mask
-	
+		if fwhm is not None:
+			new.mask = GaussSmooth(new.mask, fwhm, self.dx * 180.*60./np.pi)
+
 		return new
 
 	def Extract(self, np):
@@ -309,6 +312,7 @@ class FlatMapFFT(Pix):
 			plt.show()
 
 		return fft_
+
 
 	def Bin2DSpectra(self, ft=None, lbins=None, delta_ell=None, prefact=None, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
 		""" 
