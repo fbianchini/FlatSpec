@@ -317,6 +317,7 @@ class FlatMapFFT(Pix):
 	def Bin2DSpectra(self, ft=None, lbins=None, delta_ell=None, prefact=None, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
 		""" 
 		Bins a 2D power spectrum by azimuthally averaging it and returns 1D power spectrum 
+		- lmin, lmax, lxmax, lxmin, ... filtering in lspace
 		"""
 		if ft is None:
 			ft = self.ft
@@ -325,13 +326,16 @@ class FlatMapFFT(Pix):
 
 		# Setup the bins if not provided
 		if lbins is None:
-			lmin     = int(np.ceil(2 * np.pi / np.sqrt(self.dx * self.nx * self.ny * self.dy))) # Set by patch size
+			lmin_ = int(np.ceil(2 * np.pi / np.sqrt(self.dx * self.nx * self.ny * self.dy))) # Set by patch size
 			#lmax = int(np.ceil(np.pi / self.dx)) # ! Just an approx: assumes same-size pixels 
 			if delta_ell is None:
 				delta_ell = 2 * lmin # Minimun bins bandwith: suggested in PoKER paper (astro-ph:1111.0766v1)
-			n_bins   = int(np.ceil(np.max(L / delta_ell))) # number of bins
-			ell_bins = np.asarray([ [delta_ell*i_+lmin, delta_ell*(i_+1)+lmin] for i_ in xrange(n_bins)]) 
+			nbins    = int(np.ceil(np.max(L / delta_ell))) # number of bins
+			ell_bins = np.asarray([ [delta_ell*i+lmin_, delta_ell*(i+1)+lmin_] for i in xrange(nbins)]) 
 			lbins    = np.append(ell_bins[:,0], [ell_bins[-1,1]]) # bins edges
+		else:
+			nbins    = len(lbins) - 1
+			ell_bins = np.asarray([[lbins[i], lbins[i+1]] for i in xrange(nbins)])
 
 		# Flattening factors
 		if prefact == None:
