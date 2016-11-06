@@ -1,16 +1,23 @@
 import numpy as np
 from Spec2D import *
 
-def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, seed=None):
+def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 	"""
 	Routine to generate Gaussian correlated random realizations
+	
+	Params
+	------
 	- cls: array with spectra. If cls is a vector the routine ouputs a single map,
 		   if cls contains 3 vectors (clxx,clyy,clxy) so that cls.shape = (lmax,3)
 		   the routine outputs two correlated realizations
 	- nx: # of pixels x-direction
 	- dx: pixel resolution in arcmin
+	- buffer: 
 	- seed:  
-	~ Note: cls must be input from l = 0
+	
+	Note
+	----
+	cls must be input from l = 0
  	"""
 	if len(cls.shape) == 1: # Just auto-correlation
 		clxx = cls
@@ -22,12 +29,18 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, seed=None):
 		clxy = cls[:,2]
 		corr = True
 	else:
+		print('Input spectra array shape is not valid!')
 		sys.exit()
 
 	ls = np.arange(len(cls))
 
+	Nx = int(nx * buff)
+	if ny is None:
+		ny = nx
+	Ny = int(ny * buff)
+
 	# Assuming all pixels equal !
-	pix    = Pix(nx, dx, ny=ny, dy=dy) 
+	pix    = Pix(Nx, dx, ny=Ny, dy=dy) 
 	npix   = pix.npix
 	shape  = pix.shape
 	lx, ly = pix.GetLxLy(shift=False)
@@ -76,7 +89,15 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, seed=None):
 	if corr:
 		mapX = (np.fft.ifft2(kMapX)).real
 		mapY = (np.fft.ifft2(kMapY)).real
+		mapX = mapX[(buff-1)/2*ny:(buff+1)/2*ny,(buff-1)/2*nx:(buff+1)/2*nx]
+		mapY = mapY[(buff-1)/2*ny:(buff+1)/2*ny,(buff-1)/2*nx:(buff+1)/2*nx]
 		return mapX, mapY
 	else:
 		mapX = (np.fft.ifft2(kMapX)).real
+		# plt.subplot(121)
+		# plt.imshow(mapX)
+		mapX = mapX[(buff-1)/2*ny:(buff+1)/2*ny,(buff-1)/2*nx:(buff+1)/2*nx]
+		# plt.subplot(122)
+		# plt.imshow(mapX)
+		# plt.show()
 		return mapX
