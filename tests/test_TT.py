@@ -126,7 +126,7 @@ def GetPValue(data, theory, cov):
 def main(args):
 
 	# Loading CMB TT spectra
-	l, cltt_ = np.loadtxt('../CurvSpec/CMB_spectra.dat', unpack=True)
+	l, cltt_ = np.loadtxt('spectra/CMB_spectra.dat', unpack=True)
 	cltt = np.nan_to_num(cltt_/l/(l+1)*2*np.pi)
 	print("...Theory spectrum loaded...")
 

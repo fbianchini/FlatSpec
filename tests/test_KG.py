@@ -123,14 +123,54 @@ def GetPValue(data, theory, cov):
 	print("~> chi2 = %f" %chi2)
 	return stats.chi2.cdf(chi2, delta.size)
 
+def do_plot(name, lb, cl_mean, cl_err, theory, theorybin):
+	f, (ax1,ax2) = plt.subplots(2, sharex=True, figsize=(10,8))
+
+	plt.suptitle(r'$N_{\rm sim} = %d$'%args.nsim + r' - $N_x =$ %d ' %args.nx +' (%.2f arcmin) '%args.reso +' - Signal only')
+
+	for i in xrange(args.nsim):
+		if i == 0:
+			ax1.plot(lb, cl[i,:], 'lightgrey', lw=0.4, label='Sims')
+		else:
+			ax1.plot(lb, cl[i,:], 'lightgrey', lw=0.4)
+	
+	ax1.plot(l, theory, 'k-', lw=2, label='Theory')
+	ax1.errorbar(lb, cl_mean, yerr=cl_err/np.sqrt(args.nsim), label=r'Mean', color='royalblue', fmt='o', capsize=0)
+	ax1.legend(loc='best')
+	ax1.yaxis.set_major_locator(MaxNLocator(nbins=5))
+	plt.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+	ax1.set_ylabel(r'$C_{\ell}^{'+name+'}$')
+	ax1.set_xlim([2, 2010)
+	# ax1.set_ylim([0,7e-7])
+
+	ax2.errorbar(lb, cl_mean/theorybin - 1., yerr=cl_err/np.sqrt(args.nsim)/theorybin, color='royalblue', fmt='o', capsize=0)
+	ax2.axhline(ls='--', color='k')
+	ax2.set_xlabel(r'Multipole $\ell$')
+	ax2.set_ylabel(r'$\frac{\langle \hat{C}_{\ell}^{'+name+'} \rangle}{C_{\ell}^{'+name+',th}}-1$')
+	ax2.set_ylim([-0.1,0.15])
+	ax2.yaxis.set_major_locator(MaxNLocator(nbins=4, prune='upper'))
+
+	print("...here comes the plot...")
+	# plt.show()
+	plt.tight_layout()
+	plt.savefig('plots/cl'+name+'_spectra_nsim'+str(args.nsim)+'_reso'+str(args.reso)+'_nx'+str(args.nx)+'_pad'+str(args.pad)+'_smooth'+str(args.smooth)+'_buff'+str(args.buff)+'_smoothpad'+str(args.smooth_pad)+'.pdf', bboxes_inches='tight')
+
+
 def main(args):
 
 	# Loading CMB TT spectra
-	l, cltt_ = np.loadtxt('../CurvSpec/CMB_spectra.dat', unpack=True)
-	cltt = np.nan_to_num(cltt_/l/(l+1)*2*np.pi)
-	print("...Theory spectrum loaded...")
+	l, clkg, clgg, clkk = np.loadtxt('spectra/XCSpectra.dat', unpack=True, usecols=[0,1,3,6])
 
-	cl = []
+	print("...Theory spectra loaded...")
+
+	cls = np.zeros((len(l),3))
+	cls[:,0] = clkk
+	cls[:,1] = clgg
+	cls[:,2] = clkg
+
+	CLKK = []
+	CLGG = []
+	CLKG = []
 
 	# Reading mask
 	if args.mask is not None:
@@ -143,18 +183,21 @@ def main(args):
 
 	Bin = Binner(bin_edges=bins)
 
-	white = lambda l:l*(l+1)/2/np.pi
+	# white = lambda l:l*(l+1)/2/np.pi
 
 	# Running sims
 	print("...Start running %d sims" %args.nsim)
 	for i in xrange(args.nsim):
-		data = GenCorrFlatMaps(cltt, args.nx, args.reso, buff=args.buff, seed=i)
-		TT   = FlatMapReal(args.nx, args.reso, map=data, mask=mask)
+		data_kk, data_gg = GenCorrFlatMaps(cls, args.nx, args.reso, buff=args.buff, seed=i)
+		KK = FlatMapReal(args.nx, args.reso, map=data_kk, mask=mask)
+		GG = FlatMapReal(args.nx, args.reso, map=data_gg, mask=mask)
 		if args.smooth != 0: 
-			TT.ApplyGaussBeam(args.smooth)
+			KK.ApplyGaussBeam(args.smooth)
+			GG.ApplyGaussBeam(args.smooth)
 		if args.pad != 0: 
-			TT = TT.Pad(args.pad, fwhm=args.smooth_pad)
-			# X = TT.map*TT.mask
+			KK = KK.Pad(args.pad, fwhm=args.smooth_pad)
+			GG = GG.Pad(args.pad, fwhm=args.smooth_pad)
+			# X = KK.map*KK.mask
 			# plt.subplot(121)
 			# plt.imshow(TT.mask)
 			# plt.subplot(122)
@@ -165,58 +208,48 @@ def main(args):
 			nx = args.pad
 		else:
 			nx = args.nx
-		FT_TT   = FlatMapFFT(nx, args.reso, map=TT)
-		lb, cl_ = FT_TT.GetCl(prefact=white, lbins=bins)
-		cl.append(cl_)
+		FT_KK     = FlatMapFFT(nx, args.reso, map=KK)
+		FT_GG     = FlatMapFFT(nx, args.reso, map=GG)
+		lb, clkk_ = FT_KK.GetCl(lbins=bins)
+		lb, clgg_ = FT_GG.GetCl(lbins=bins)
+		lb, clkg_ = FT_KK.GetCl(lbins=bins, map2=GG)
+		CLKK.append(clkk_)
+		CLGG.append(clgg_)
+		CLKG.append(clkg_)
 		# embed() 
 		# sys.exit()
 	print("...sims done...")
 
 	# Computing statistics
-	cl      = np.asarray(cl)
-	cl_mean = np.mean(cl, axis=0)
-	cl_cov  = np.cov(cl.T)
-	cl_err  = np.sqrt(np.diag(cl_cov))
+	CLKK = np.asarray(CLKK)
+	CLGG = np.asarray(CLGG)
+	CLKG = np.asarray(CLKG)
+
+	clkk_mean = np.mean(CLKK, axis=0)
+	clgg_mean = np.mean(CLGG, axis=0)
+	clkg_mean = np.mean(CLKG, axis=0)
+	
+	clkk_cov  = np.cov(CLKK.T)
+	clgg_cov  = np.cov(CLGG.T)
+	clkg_cov  = np.cov(CLKG.T)
+
+	clkk_err  = np.sqrt(np.diag(clkk_cov))
+	clgg_err  = np.sqrt(np.diag(clgg_cov))
+	clkg_err  = np.sqrt(np.diag(clkg_cov))
 
 	if args.smooth != 0:
 		bl = hp.gauss_beam(args.smooth*np.pi / 180. / 60.,l.size-1)
 	else:
 		bl = 1.0
 
-	print ('=> p-value = %f' %(GetPValue(cl_mean, Bin.bin_spectra(cltt_*bl**2), cl_cov/args.nsim)))
+	print ('=> KK p-value = %f' %(GetPValue(clkk_mean, Bin.bin_spectra(clkk*bl**2), clkk_cov/args.nsim)))
+	print ('=> GG p-value = %f' %(GetPValue(clgg_mean, Bin.bin_spectra(clgg*bl**2), clgg_cov/args.nsim)))
+	print ('=> KG p-value = %f' %(GetPValue(clkg_mean, Bin.bin_spectra(clkg*bl**2), clkg_cov/args.nsim)))
 
-	# Plots
-	f, (ax1,ax2) = plt.subplots(2, sharex=True, figsize=(10,8))
-
-	plt.suptitle(r'$N_{\rm sim} = %d$'%args.nsim + r' - $N_x =$ %d ' %args.nx +' (%.2f arcmin) '%args.reso +' - Signal only')
-
-	for i in xrange(args.nsim):
-		if i == 0:
-			ax1.plot(lb, cl[i,:], 'lightgrey', lw=0.4, label='Sims')
-		else:
-			ax1.plot(lb, cl[i,:], 'lightgrey', lw=0.4)
-	
-	ax1.plot(l, cltt_*bl**2, 'k-', lw=2, label='Theory')
-	ax1.errorbar(lb, cl_mean, yerr=cl_err/np.sqrt(args.nsim), label=r'$\langle D_{\ell}^{TT}\rangle$', color='royalblue', fmt='o', capsize=0)
-	ax1.legend(loc='best')
-	ax1.yaxis.set_major_locator(MaxNLocator(nbins=5))
-	plt.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
-	ax1.set_ylabel(r'$\mathcal{D}_{\ell}^{TT}$')
-	ax1.set_xlim([2, Bin.bin_edges[-1]+10])
-	# ax1.set_ylim([0,7e-7])
-
-	ax2.errorbar(lb, cl_mean/Bin.bin_spectra(cltt_*bl**2) - 1., yerr=cl_err/np.sqrt(args.nsim)/Bin.bin_spectra(cltt_*bl**2), color='royalblue', fmt='o', capsize=0)
-	ax2.axhline(ls='--', color='k')
-	ax2.set_xlabel(r'Multipole $\ell$')
-	ax2.set_ylabel(r'$\frac{\langle \hat{\mathcal{D}}_{\ell}^{TT} \rangle}{\mathcal{D}_{\ell}^{TT,th}}-1$')
-	ax2.set_ylim([-0.1,0.15])
-	ax2.yaxis.set_major_locator(MaxNLocator(nbins=4, prune='upper'))
-
-	print("...here comes the plot...")
-	# plt.show()
-	plt.tight_layout()
-	plt.savefig('cltt_spectra_nsim'+str(args.nsim)+'_reso'+str(args.reso)+'_nx'+str(args.nx)+'_pad'+str(args.pad)+'_smooth'+str(args.smooth)+'_buff'+str(args.buff)+'_smoothpad'+str(args.smooth_pad)+'.pdf', bboxes_inches='tight')
-
+	# Plots ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	do_plot('kk', lb, clkk_mean, clkk_err, clkk, Bin.bin_spectra(clkk*bl**2))
+	do_plot('gg', lb, clgg_mean, clgg_err, clgg, Bin.bin_spectra(clgg*bl**2))
+	do_plot('kg', lb, clkg_mean, clkg_err, clkg, Bin.bin_spectra(clkg*bl**2))
 
 if __name__=='__main__':
 		parser = argparse.ArgumentParser(description='')

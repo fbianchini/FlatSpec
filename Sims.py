@@ -83,9 +83,6 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 	if corr:
 		kMapY = B*u + C*v
 
-	# b = bufferFactor
-	# self.data = data[(b-1)/2*self.Ny:(b+1)/2*self.Ny,(b-1)/2*self.Nx:(b+1)/2*self.Nx]
-
 	if corr:
 		mapX = (np.fft.ifft2(kMapX)).real
 		mapY = (np.fft.ifft2(kMapY)).real
