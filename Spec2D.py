@@ -2,7 +2,7 @@ import numpy as np
 import sys
 from scipy import ndimage
 import matplotlib.pyplot as plt
-
+from Utils import *
 
 # Here you can find some classes to deal with flat-sky scalar maps 
 # (like temperature, lensing, galaxies,..) and their FFTs.
@@ -118,7 +118,7 @@ class FlatMapReal(Pix):
 		self.map = GaussSmooth(self.map, fwhm, self.dx * 180.*60./np.pi , order=order)
 
 
-	def Pad(self, nxp, nyp=None, fwhm=None):
+	def Pad(self, nxp, nyp=None, fwhm_mask=None, apo_mask=True):
 		""" 
 		Zero-pad the present map and creates a new one with dimensions nxp (>nx), nyp (>ny) 
 		with this map at its center. 
@@ -135,8 +135,10 @@ class FlatMapReal(Pix):
 		new.map[ (nyp-self.ny)/2:(nyp+self.ny)/2, (nxp-self.nx)/2:(nxp+self.nx)/2 ]  = self.map
 		new.mask[:] = 0.
 		new.mask[ (nyp-self.ny)/2:(nyp+self.ny)/2, (nxp-self.nx)/2:(nxp+self.nx)/2 ] = self.mask
-		if fwhm is not None:
-			new.mask = GaussSmooth(new.mask, fwhm, self.dx * 180.*60./np.pi)
+		if fwhm_mask is not None:
+			new.mask = GaussSmooth(new.mask, fwhm_mask, self.dx * 180.*60./np.pi)
+		if apo_mask:
+			new.mask = smooth_window(new.mask)
 
 		return new
 

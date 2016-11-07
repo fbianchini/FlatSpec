@@ -158,5 +158,5 @@ def GetCountsTot(mapgg, mean, nx, dx, ny=None, dy=None, dim='pix'):
  	elif dim == 'arcmin':
  	    mean = mean * (pix.dx * pix.dy) / (np.pi / 180. / 60.)
 
- 	return float(np.random.poisson(lam=mean*(1.+mapgg)))
+ 	return np.random.poisson(lam=mean*(1.+mapgg.flatten())).reshape(shape)
 
