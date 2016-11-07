@@ -23,7 +23,7 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 		clxx = cls
 		corr = False
 	elif len(cls.shape) == 2: # Or cross-correlation
-		assert(cl.shape[1] == 3)
+		assert(cls.shape[1] == 3)
 		clxx = cls[:,0]
 		clyy = cls[:,1]
 		clxy = cls[:,2]
@@ -62,12 +62,12 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 	# Injecting the correlation degree
 	A = np.sqrt(xx)
 	if corr:
-		B  = xy/tem_a
+		B  = np.nan_to_num(xy/A)
 		C_ = yy - xy*xy/xx
 		if np.any(C_ < 0.0):
 			print "Could not calculate XX,XY,YY covariance square root - YY > XY^2/XX was not true at all l"
 			sys.exit()
-		C = np.sqrt(C_)
+		C = np.nan_to_num(np.sqrt(C_))
 	
 	if seed == None:
 		np.random.seed(0)
@@ -82,6 +82,7 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 	kMapX = A*u
 	if corr:
 		kMapY = B*u + C*v
+
 
 	if corr:
 		mapX = (np.fft.ifft2(kMapX)).real
@@ -98,3 +99,64 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 		# plt.imshow(mapX)
 		# plt.show()
 		return mapX
+
+def GenPoissNoise(mean, nx, dx, ny=None, dy=None, dim='pix'):
+	"""
+	Routine to generate Poisson noise maps given the average rate of observations.
+	
+	Params
+	------
+	- mean: parameter \lambda of Poissonian process (i.e. avg galaxies #, photon counts $ ,...)
+	- nx: # of pixels x-direction
+	- dx: pixel resolution in arcmin
+	- dim: units of mean param, i.e. mean/pixel (can be 'pixel', 'steradian' or 'arcmin')
+ 	"""
+ 	pix    = Pix(nx, dx, ny=ny, dy=dy) 
+ 	npix   = pix.npix
+ 	shape  = pix.shape
+
+ 	# Converting to avg per pixel
+ 	if dim == 'pix':
+ 		pass
+ 	if dim == 'ster':
+ 	    mean = mean * pix.dx * pix.dy
+ 	elif dim == 'arcmin':
+ 	    mean = mean * (pix.dx * pix.dy) / (np.pi / 180. / 60.)
+
+ 	# Creating the noise map
+ 	noise_map = np.random.poisson(lam=mean, size=npix).reshape(shape)
+ 	
+ 	# Converting it to contrast map
+ 	# if delta:
+ 	#     noise_bar = np.mean(noise_map)
+ 	#     delta_map = (noise_map - noise_bar)/noise_bar
+ 	#     delta_map[noise_map < -1.] = -1.
+
+ 	return float(noise_map)
+
+def GetCountsTot(mapgg, mean, nx, dx, ny=None, dy=None, dim='pix'):
+	"""
+	Routine to generate total galaxy counts maps given the average # of galaxies and the signal overdensity. 
+	
+	Params
+	------
+	- mapgg: map containg clustering signal of galaxy *overdensity*
+	- mean: avg galaxies #
+	- nx: # of pixels x-direction
+	- dx: pixel resolution in arcmin
+	- dim: units of mean param, i.e. mean/pixel (can be 'pixel', 'steradian' or 'arcmin')
+ 	"""
+ 	pix    = Pix(nx, dx, ny=ny, dy=dy) 
+ 	npix   = pix.npix
+ 	shape  = pix.shape
+
+ 	# Converting to avg per pixel
+ 	if dim == 'pix':
+ 		pass
+ 	if dim == 'ster':
+ 	    mean = mean * pix.dx * pix.dy
+ 	elif dim == 'arcmin':
+ 	    mean = mean * (pix.dx * pix.dy) / (np.pi / 180. / 60.)
+
+ 	return float(np.random.poisson(lam=mean*(1.+mapgg)))
+
