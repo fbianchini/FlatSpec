@@ -304,9 +304,10 @@ class FlatMapFFT(Pix):
 
 		if plot2D:
 			# plt.subplot(121)
+			lx, ly = self.GetLxLy()
 			plt.imshow(np.log10(np.abs(fft_)), cmap='viridis')
 			plt.colorbar()
-			plt.title(r'$\log_{10}{|FFT|}$')
+			plt.title(r'$\log_{10}{|FT|}$', extent=[lx.min(),lx.max(),ly.min(),ly.max()])
 			# plt.subplot(122)
 			# plt.imshow(np.abs(fft_))
 			# plt.colorbar()
