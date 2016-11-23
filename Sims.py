@@ -1,5 +1,6 @@
 import numpy as np
 from Spec2D import *
+from IPython import embed
 
 def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 	"""
@@ -87,16 +88,18 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 	if corr:
 		mapX = (np.fft.ifft2(kMapX)).real
 		mapY = (np.fft.ifft2(kMapY)).real
-		mapX = mapX[(buff-1)/2*ny:(buff+1)/2*ny,(buff-1)/2*nx:(buff+1)/2*nx]
-		mapY = mapY[(buff-1)/2*ny:(buff+1)/2*ny,(buff-1)/2*nx:(buff+1)/2*nx]
+		mapX = mapX[(buff-1)/2.*ny:(buff+1)/2.*ny,(buff-1)/2.*nx:(buff+1)/2.*nx]
+		mapY = mapY[(buff-1)/2.*ny:(buff+1)/2.*ny,(buff-1)/2.*nx:(buff+1)/2.*nx]
 		return mapX, mapY
 	else:
 		mapX = (np.fft.ifft2(kMapX)).real
 		# plt.subplot(121)
 		# plt.imshow(mapX)
+		# plt.colorbar()
 		mapX = mapX[(buff-1)/2*ny:(buff+1)/2*ny,(buff-1)/2*nx:(buff+1)/2*nx]
 		# plt.subplot(122)
 		# plt.imshow(mapX)
+		# plt.colorbar()
 		# plt.show()
 		return mapX
 

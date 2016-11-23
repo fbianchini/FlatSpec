@@ -10,7 +10,8 @@ from Utils import *
 # that can be found at https://github.com/dhanson/quicklens
 
 
-# arcmin2rad = np.pi / 180. / 60. 
+arcmin2rad = np.pi / 180. / 60. 
+rad2arcmin = 1./arcmin2rad
 
 def GaussSmooth(map, fwhm, reso, order=0):
 	"""
@@ -41,8 +42,8 @@ class Pix(object):
 			dy = dx
 
 		# Converting pixel resolution from arcmin -> rad
-		dx *= np.pi / 180. / 60. 
-		dy *= np.pi / 180. / 60. 
+		dx *= arcmin2rad 
+		dy *= arcmin2rad
 
 		self.nx    = nx 
 		self.dx    = dx 
@@ -76,7 +77,7 @@ class Pix(object):
 		return np.sqrt(lx**2 + ly**2)
 
 
-	def Compatible(self, other):
+	def Compatible(self, other):	
 		return ( (self.nx == other.nx) and
 			     (self.ny == other.ny) and
 				 (self.dx == other.dx) and
@@ -111,38 +112,45 @@ class FlatMapReal(Pix):
 			self.mask = mask
 			assert( (self.ny, self.nx) == self.mask.shape)
 
+	def Copy(self):
+		return FlatMapReal( self.nx, self.dx, self.map.copy(), mask=self.mask.copy() , ny = self.ny, dy = self.dy )
+
 	def ApplyGaussBeam(self, fwhm, order=0):
 		"""
 		Smooth the map with a Gaussian beam specified by its FWHM (in arcmin).
 		"""
-		self.map = GaussSmooth(self.map, fwhm, self.dx * 180.*60./np.pi , order=order)
+		self.map = GaussSmooth(self.map, fwhm, self.dx * rad2arcmin , order=order)
 
-
-	def Pad(self, nxp, nyp=None, fwhm_mask=None, apo_mask=True):
+	def Pad(self, padX, padY=None, fwhm_mask=None, apo_mask=True):
 		""" 
 		Zero-pad the present map and creates a new one with dimensions nxp (>nx), nyp (>ny) 
 		with this map at its center. 
 		- fwhm: 
 		"""
-		assert( nxp > self.nx )
-		if nyp == None:
-			nyp = nxp
-		assert( nyp > self.ny )
-		assert( np.mod( nxp - self.nx, 2 ) == 0 )
-		assert( np.mod( nyp - self.ny, 2 ) == 0 )
+		assert( padX > 1 )
+		if padY == None:
+			padY = padX
+		assert( padY > 1 )
+		# assert( np.mod( nxp - self.nx, 2 ) == 0 )
+		# assert( np.mod( nyp - self.ny, 2 ) == 0 )
+		assert( np.mod( padX, 2 ) == 0 )
+		assert( np.mod( padY, 2 ) == 0 )
 
-		new = FlatMapReal( nx=nxp, dx=self.dx * 180 * 60 / np.pi, ny=nyp, dy=self.dy * 180 * 60 /np.pi ) # FIX ME: Multiply by 180*60/pi because of line 16/17 
+		nxp = int(padX*self.nx)
+		nyp = int(padY*self.ny)
+
+		new = FlatMapReal( nx=nxp, dx=self.dx * rad2arcmin, ny=nyp, dy=self.dy * rad2arcmin ) # FIX ME: Multiply by rad2arcmin because of line 16/17 
 		new.map[ (nyp-self.ny)/2:(nyp+self.ny)/2, (nxp-self.nx)/2:(nxp+self.nx)/2 ]  = self.map
 		new.mask[:] = 0.
 		new.mask[ (nyp-self.ny)/2:(nyp+self.ny)/2, (nxp-self.nx)/2:(nxp+self.nx)/2 ] = self.mask
 		if fwhm_mask is not None:
-			new.mask = GaussSmooth(new.mask, fwhm_mask, self.dx * 180.*60./np.pi)
+			new.mask = GaussSmooth(new.mask, fwhm_mask, self.dx * rad2arcmin)
 		if apo_mask:
 			new.mask = smooth_window(new.mask)
 
 		return new
 
-	def Extract(self, np):
+	def Extract(self, npix):
 		""" 
 		Select a subpatch of the map:
 
@@ -150,20 +158,23 @@ class FlatMapReal(Pix):
 
 		Params
 		------
-		- if len(np) == 4 => vertices of the patch to extract, i.e. np = [xmin, xmax, ymin, ymax] 
-		- if len(np) == 2 => size of patch size, i.e. np = [nxp, nyp]
+		- if len(npix) == 4 => vertices of the patch to extract, i.e. npix = [xmin, xmax, ymin, ymax] 
+		- if len(npix) == 2 => size of patch size, i.e. npix = [nxp, nyp]
 		"""
-		assert( (len(np) == 4) or (len(np) == 2) )
+		assert( (len(npix) == 4) or (len(npix) == 2) )
 		
-		if len(np) == 4:
-			nxmin, nxmax, nymin, nymax = np
+		if len(npix) == 4:
+			nxmin, nxmax, nymin, nymax = npix
 			assert( 0 < nxmin < nxmax < self.nx )
 			assert( 0 < nymin < nymax < self.ny )
 
-			cut = FlatMapReal( nx=nxmax-nxmin, dx=self.dx, ny=nymax-nymin, dy=self.dy )
-			cut.map = self.map[nymin:nymax, nxmin:nxmax]
+			cut = FlatMapReal( nx=nxmax-nxmin, dx=self.dx*rad2arcmin, ny=nymax-nymin, dy=self.dy*rad2arcmin )
+			cut.map  = self.map[nymin:nymax, nxmin:nxmax]
+			cut.mask = self.mask[nymin:nymax, nxmin:nxmax]
 
-		if len(np) == 2:
+		if len(npix) == 2:
+			nxp = npix[0]
+			nyp = npix[1]
 			assert( nxp < self.nx )
 			if nyp == None:
 				nyp = nxp
@@ -171,9 +182,9 @@ class FlatMapReal(Pix):
 			assert( np.mod( nxp - self.nx, 2 ) == 0 )
 			assert( np.mod( nyp - self.ny, 2 ) == 0 )
 
-			cut = FlatMapReal( nx=nxp, dx=self.dx, ny=nyp, dy=self.dy )
-			cut.map[ (nyp-self.ny)/2:(nyp+self.ny)/2, (nxp-self.nx)/2:(nxp+self.nx)/2 ] = self.map
-		
+			cut = FlatMapReal( nx=nxp, dx=self.dx*rad2arcmin, ny=nyp, dy=self.dy*rad2arcmin )
+			cut.map  = self.map[ (self.ny)/2.-nyp:(self.ny)/2.+nyp, (self.nx)/2.-nxp:(self.nx)/2.+nxp ]
+			cut.mask = self.mask[ (self.ny)/2.-nyp:(self.ny)/2.+nyp, (self.nx)/2.-nxp:(self.nx)/2.+nxp ]
 		return cut
 
 	def Display(self, title=None, cbu=None, xu=None, yu=None, cmap='inferno'):
@@ -197,6 +208,31 @@ class FlatMapReal(Pix):
 		if yu    is not None: plt.ylabel(yu)
 		plt.show()
 
+	def FilterMap(self, filt, padX=2, array=True, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
+		if padX != 1:
+			newmap = self.Pad(padX, apo_mask=True)
+		else:
+			newmap = self.Copy()
+
+		if callable(filt):
+			L = newmap.GetL(shift=False)
+			filt = filt(L) 
+		else:
+			assert (filt.shape == newmap.map.shape)
+
+		FT = FlatMapFFT(newmap.map.shape[0], newmap.dx*rad2arcmin, map=newmap)
+
+		filtmap =  FT.FT2Map(filt=filt, array=array, lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
+
+		if array:
+			if padX != 1:
+				filtmap = filtmap[self.nx/2.*(padX-1):self.nx/2.*(padX+1.)]
+		else:
+			if padX	!= 1:
+				filtmap = filtmap.Extract([int(self.nx/2.*(padX-1.)),int(self.nx/2.*(padX+1.)),int(self.nx/2.*(padX-1.)),int(self.nx/2.*(padX+1.))])
+
+		return filtmap
+
 class FlatMapFFT(Pix):
 	"""
 	Class to store a (complex) 2D Fourier Transform (FT) and to perfom 
@@ -211,7 +247,7 @@ class FlatMapFFT(Pix):
 	- nx:   # of pixels in x dir
 	- dx:   pixel resolution in *arcmin* 
 	- ft:   2d (complex) array containing FT of the map
-	- map:  2d array containing the field
+	- map:  FlatMapReal object containing the field
 	"""
 	def __init__(self, nx, dx, ft=None, map=None, ny=None, dy=None):
 		super(FlatMapFFT, self).__init__(nx, dx, ny=ny, dy=dy)
@@ -221,15 +257,16 @@ class FlatMapFFT(Pix):
 
 		if ft is None:
 			if map is None:
-				ft       = np.zeros((self.ny, self.nx), dtype=np.complex)
+				self.ft  = np.zeros((self.ny, self.nx), dtype=np.complex)
 				self.map = None
 			else:
 				assert( self.Compatible(map) ) 
 				self.map = map
-				self.ft  = np.fft.fft2(map.map)
+				self.ft  = np.fft.fft2(map.map*map.mask) 
 		else:
 			self.ft  = ft
-			self.map = self.GetMapReal(shift=True)
+			self.map = self.FT2Map(ft=self.ft)
+			# What about the mask?
 
 		assert( (self.ny, self.nx) == self.ft.shape )
 
@@ -245,13 +282,13 @@ class FlatMapFFT(Pix):
 
 		return fftp
 
-	def GetLMask(self, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
+	def GetLMask(self, shift=False, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
 		""" 
 		return a Fourier mask for the pixelization associated with this object which is zero over customizable ranges of L. 
 		"""
 		mask      = np.ones((self.ny, self.nx), dtype=np.complex)
-		lx, ly    = self.GetLxLy()
-		L         = self.GetL()
+		lx, ly    = self.GetLxLy(shift=shift)
+		L         = self.GetL(shift=shift)
 		if lmin  != None: mask[ np.where(L < lmin) ] = 0.0
 		if lmax  != None: mask[ np.where(L >=lmax) ] = 0.0
 		if lxmin != None: mask[ np.where(np.abs(lx) < lxmin) ] = 0.0
@@ -260,20 +297,46 @@ class FlatMapFFT(Pix):
 		if lymax != None: mask[ np.where(np.abs(ly) >=lymax) ] = 0.0
 		return mask
 
-	def GetMapReal(self, ft=None, shift=False):
+	def FT2Map(self, ft=None, filt=None, array=True, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
 		""" 
 		Returns the FlatMapReal associated to this FT. 
+		- array: return just the 2d array containing the map?
 		"""
 		if ft is None:
-			ft = self.ft
+			ft = self.ft # FT not shifted
 
-		# assert( self.Compatible(ft) )
-		if shift:
-			return FlatMapReal(self.nx, self.dx, map=np.fft.ifft2(np.fft.fftshift(ft)).real, ny=self.ny, dy=self.dy)
+		if filt is None:
+			filt = np.ones(ft.shape, dtype=np.complex)
 		else:
-			return FlatMapReal(self.nx, self.dx, map=np.fft.ifft2(ft).real, ny=self.ny, dy=self.dy)
+			filt = filt.astype(np.complex)
 
-	def Get2DSpectra(self, map1=None, map2=None, plot2D=False):
+		mask = self.GetLMask(lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
+		filt *= mask.astype(filt.dtype) 
+
+		# ft   *= filt
+
+		if array:
+			return np.fft.ifft2(ft*filt).real
+		else:
+			return FlatMapReal(self.nx, self.dx*rad2arcmin, map=np.fft.ifft2(ft*filt).real, ny=self.ny, dy=self.dy*rad2arcmin)
+
+	def FilterFT(self, filt, ft=None, array=True):
+		"""
+		Filter FT 
+		*Filter should not be fftshifted*
+		- array: return just the 2d array containing the filtered FT?
+		"""
+		if ft is None:
+			ft = self.ft # FT not shifted
+
+		assert (filt.shape == ft.shape)
+
+		if array:
+			return ft * filt
+		else:
+			return FlatMapFFT(self.nx, self.dx, ft=ft*filt, ny=self.ny, dy=self.dy)
+
+	def Get2DSpectra(self, map1=None, map2=None, plot2D=False, shift=True):
 		""" 
 		Returns the (centered) 2d FT of a given map.
 
@@ -291,7 +354,7 @@ class FlatMapFFT(Pix):
 	
 		if map2 is None:
 			map2 = map1
-		else:
+		# else:
 			assert( self.Compatible(map2) )
 
 		# Creating common mask 
@@ -314,8 +377,10 @@ class FlatMapFFT(Pix):
 			# plt.title(r'$|FFT|$')
 			plt.show()
 
-		return fft_
-
+		if shift:
+			return fft_
+		else:
+			return np.fft.fftshift(fft_)
 
 	def Bin2DSpectra(self, ft=None, lbins=None, delta_ell=None, prefact=None, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
 		""" 
@@ -368,3 +433,86 @@ class FlatMapFFT(Pix):
 		lb, cl = self.Bin2DSpectra(fft2d, lbins=lbins, delta_ell=delta_ell, prefact=prefact, lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
 
 		return lb, cl
+
+def J(k1, k2, k3):	
+	"""
+	Computes the J function as defined in Eq.(A10) of MASTER paper (astro-ph/0105302)
+	- k1 and k2 are numbers
+	- k3 can be number/array
+	"""
+	k1 = np.asarray(k1, dtype=np.double)
+	k2 = np.asarray(k2, dtype=np.double)
+	k3 = np.asarray(k3, dtype=np.double)
+
+	d  = np.broadcast(k1,k2,k3)
+	J_ = np.zeros(d.shape)
+	
+	# Indices where J function is different from zero
+	# idx = np.where((k1 < k2 + k3) & (k1 > np.abs(k2 - k3)))[0]
+	idx1 = np.where(k1 > np.abs(k2-k3))[0]
+	idx2 = np.where(k1 < k2+k3)[0]
+	idx  = np.intersect1d(idx1,idx2)
+
+	tmp = 2*k1**2*k2**2 + 2*k1**2*k2**2 + 2*k2**2*k3**2 - k1**4 - k2**4 - k3**4
+
+	# print k1, k2, k3[idx], np.min(tmp[idx])
+
+
+	if J_.ndim > 0: # J_ is an array
+		J_[idx] = 2.0 / np.pi / np.sqrt(tmp[idx])
+	else: # J_ is a number
+		if idx.size > 0:
+			J_ = 2.0 / np.pi / np.sqrt(tmp)
+		else:
+			J_ = 0.0
+	
+	J_[np.isnan(J_)] = 0.0
+
+	return J_
+
+
+def GetMll(mask, reso, lbins=None, delta_ell=None, npts=5000):
+	"""
+	Returns the mode-coupling matrix from MASTER paper (astro-ph/0105302).
+	Here k-vectors are already converted into l-vectors, while the paper uses wavenumber, hence the differences.
+	The integral over the mask power spectrum is computed by means of Chebyschev-Gauss quadrature.
+	"""
+	assert ( len(mask.shape) == 2 )
+
+	if lbins is None:
+		if delta_ell is None:
+			delta_ell = 10					
+		nbins    = int(np.ceil(np.max(4000/ delta_ell))) # number of bins
+		ell_bins = np.asarray([ [delta_ell*i, delta_ell*(i+1)] for i in xrange(nbins)]) 
+		lbins    = np.append(ell_bins[:,0], [ell_bins[-1,1]]) # bins edges
+	else:
+		nbins    = len(lbins) - 1
+		ell_bins = np.asarray([[lbins[i], lbins[i+1]] for i in xrange(nbins)])
+
+	m_ = FlatMapReal(mask.shape[1], reso, ny=mask.shape[0], dy=reso, map=mask)
+	m  = FlatMapFFT(mask.shape[1], reso, ny=mask.shape[0], dy=reso, map=m_)
+
+	# Calculating mask 1D power spectrum W(l)
+	l3, Wl = m.GetCl(lbins=lbins)
+
+	l1 = np.mean(ell_bins,axis=-1)
+	l2 = np.mean(ell_bins,axis=-1)
+
+	M_out = np.empty([l1.size,l2.size])
+
+	# CG quadrature points & weights
+	wi  = np.pi / npts
+	tmp = (2.*(np.arange(1,npts+1)-1)) / (2.*npts) * np.pi
+	vi  = np.cos(tmp)
+
+	for i in xrange(l1.size):
+		for j in xrange(l2.size):
+			v    = (l3**2 - l1[i]**2 - l2[j]**2) / (2.0*l1[i]*l2[j])
+			fv   = Wl
+			fvi  = np.interp(vi,v,fv, left=0., right=0.)
+			tmp2 = np.sum(wi*fvi)
+
+			# TODO: should I multiply for \Delta k_2??
+			M_out[i,j] = l2[j]/(2.*np.pi)  * tmp2 
+
+	return np.nan_to_num(M_out)
