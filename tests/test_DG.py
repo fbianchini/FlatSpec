@@ -17,6 +17,10 @@ import healpy as hp
 import scipy.signal
 from tqdm import tqdm
 
+arcmin2rad = np.pi / 180. / 60. 
+rad2arcmin = 1./arcmin2rad
+
+
 def SetPlotStyle():
    rc('text',usetex=True)
    rc('font',**{'family':'serif','serif':['Computer Modern']})
@@ -159,7 +163,7 @@ def do_plot(name, lb, cl, cl_mean, cl_err, theory, theorybin):
 	print("...here comes the plot...")
 	# plt.show()
 	plt.tight_layout()
-	plt.savefig('plots/'+name+'/cl'+name+'_spectra_nsim'+str(args.nsim)+'_reso'+str(args.reso)+'_nx'+str(args.nx)+'_pad'+str(args.pad)+'_smooth'+str(args.smooth)+'_buff'+str(args.buff)+'_smoothpad'+str(args.smooth_pad)+'_deltaell'+str(args.delta_ell)+'_noise'+str(args.noise)+'.pdf', bboxes_inches='tight')
+	plt.savefig('plots/'+name+'/cl'+name+'_spectra_nsim'+str(args.nsim)+'_reso'+str(args.reso)+'_nx'+str(args.nx)+'_pad'+str(args.pad)+'_smooth'+str(args.smooth)+'_buff'+str(args.buff)+'_smoothpad'+str(args.smooth_pad)+'_deltaell'+str(args.delta_ell)+'_noise'+str(args.noise)+'_fromDeflection.pdf', bboxes_inches='tight')
 	plt.close()
 
 def main(args):
@@ -172,9 +176,11 @@ def main(args):
 	print("...Theory spectra loaded...")
 
 	cls = np.zeros((len(l),3))
-	cls[:,0] = clkk
+	cls[:,0] = np.nan_to_num(clkk * 4 / (l*(l+1)))
 	cls[:,1] = clgg
-	cls[:,2] = clkg
+	cls[:,2] = np.nan_to_num(clkg * 2 / np.sqrt(l*(l+1)))
+
+	nldd = np.nan_to_num(nlkk * 4 / (l*(l+1)))
 
 	CLKK = []
 	CLGG = []
@@ -198,21 +204,28 @@ def main(args):
 
 	# white = lambda l:l*(l+1)/2/np.pi
 
+	# p = Pix(args.nx*2, args.reso)
+	# L = p.GetL(shift=False)
+	# f = np.sqrt(L*(L+1))/2.
+
 	# Running sims
 	print("...Start running %d sims" %args.nsim)
 	for i in tqdm(xrange(args.nsim)):
-		data_kk, data_gg = GenCorrFlatMaps(cls, args.nx, args.reso, buff=args.buff, seed=i)
+		data_dd, data_gg = GenCorrFlatMaps(cls, args.nx, args.reso, buff=args.buff, seed=i)
 		if args.noise:
-			data_nkk   = GenCorrFlatMaps(nlkk/10., args.nx, args.reso, buff=args.buff, seed=args.nsim*i)
-			data_kktot = data_kk + data_nkk
+			data_ndd   = GenCorrFlatMaps(nldd/10., args.nx, args.reso, buff=args.buff, seed=args.nsim*i)
+			data_ddtot = data_dd + data_ndd
 			data_ggtot = GetCountsTot(data_gg, 5.76e6, args.nx, args.reso, dim='sterad') # Hard-coded H-ATLAS galaxy density in gal/steradian
 			data_ggtot = data_ggtot/data_ggtot.mean() - 1. # To delta_g
 		else:
-			data_kktot = data_kk
+			data_ddtot = data_dd
 			data_ggtot = data_gg
 
-		KK = FlatMapReal(args.nx, args.reso, map=data_kktot, mask=mask)
+		# Deflection => convergence
+		DD = FlatMapReal(args.nx, args.reso, map=data_ddtot)
+		KK = DD.FilterMap(lambda l: np.sqrt(l*(l+1))/2., padX=2, array=False)
 		GG = FlatMapReal(args.nx, args.reso, map=data_ggtot, mask=mask)
+		KK.mask = mask
 		
 		if args.smooth != 0: 
 			KK.ApplyGaussBeam(args.smooth)
@@ -232,7 +245,9 @@ def main(args):
 			nx = args.pad * args.nx
 		else:
 			nx = args.nx
-		
+
+		# embed()
+
 		FT_KK     = FlatMapFFT(nx, args.reso, map=KK)
 		FT_GG     = FlatMapFFT(nx, args.reso, map=GG)
 		
@@ -243,7 +258,7 @@ def main(args):
 		# CLKK.append(clkk_)
 		# CLGG.append(clgg_)
 		CLKG.append(clkg_)
-		embed() 
+		# embed() 
 		# sys.exit()
 	print("...sims done...")
 
@@ -281,6 +296,8 @@ def main(args):
 	plt.imshow(np.corrcoef(CLKG.T), interpolation='nearest', cmap='RdBu', vmin=-1., vmax=1.)
 	plt.colorbar()
 	plt.show()
+
+	embed()
 
 if __name__=='__main__':
 		parser = argparse.ArgumentParser(description='')
