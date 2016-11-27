@@ -44,6 +44,8 @@ def SetPlotStyle():
    sns.set(rc('font',**{'family':'serif','serif':['Computer Modern']}))
    sns.set_style("ticks", {'figure.facecolor': 'grey'})
 
+SetPlotStyle() 
+
 class Binner(object):
 	"""
 	Class for computing binning scheme.
@@ -120,8 +122,6 @@ class Binner(object):
 
 		return np.dot(self.P_bl, spectra[..., :self.lmax+1])
 
-SetPlotStyle() 
-
 def GetPValue(data, theory, cov):
 
 	delta = data - theory 
@@ -163,7 +163,7 @@ def do_plot(name, lb, cl, cl_mean, cl_err, theory, theorybin):
 	print("...here comes the plot...")
 	# plt.show()
 	plt.tight_layout()
-	plt.savefig('plots/'+name+'/cl'+name+'_spectra_nsim'+str(args.nsim)+'_reso'+str(args.reso)+'_nx'+str(args.nx)+'_pad'+str(args.pad)+'_smooth'+str(args.smooth)+'_buff'+str(args.buff)+'_smoothpad'+str(args.smooth_pad)+'_deltaell'+str(args.delta_ell)+'_noise'+str(args.noise)+'_fromDeflection.pdf', bboxes_inches='tight')
+	plt.savefig('plots/'+name+'/cl'+name+'_spectra_nsim'+str(args.nsim)+'_reso'+str(args.reso)+'_nx'+str(args.nx)+'_pad'+str(args.pad)+'_smooth'+str(args.smooth)+'_buff'+str(args.buff)+'_smoothpad'+str(args.smooth_pad)+'_deltaell'+str(args.delta_ell)+'_noise'+str(args.noise)+'_Deflection.pdf', bboxes_inches='tight')
 	plt.close()
 
 def main(args):
@@ -195,9 +195,9 @@ def main(args):
 		mask = np.ones((args.nx, args.nx))
 
 	if args.delta_ell == 100:
-		bins = np.arange(1,21)*args.delta_ell
+		bins = np.arange(0,21)*args.delta_ell
 	elif args.delta_ell == 200:
-		bins = np.arange(1,11)*args.delta_ell
+		bins = np.arange(0,11)*args.delta_ell
 
 
 	Bin = Binner(bin_edges=bins)
@@ -209,9 +209,17 @@ def main(args):
 	# f = np.sqrt(L*(L+1))/2.
 
 	# Running sims
-	print("...Start running %d sims" %args.nsim)
+	if args.noise:
+		print("...Start running %d sims w/ noise" %args.nsim)
+	else:
+		print("...Start running %d sims w/o noise" %args.nsim)		
 	for i in tqdm(xrange(args.nsim)):
+		
+		# Genereting signal maps
 		data_dd, data_gg = GenCorrFlatMaps(cls, args.nx, args.reso, buff=args.buff, seed=i)
+		# data_kk = GenCorrFlatMaps(clkk, args.nx, args.reso, buff=args.buff, seed=i)
+		
+		# Generate noise maps if requested
 		if args.noise:
 			data_ndd   = GenCorrFlatMaps(nldd/10., args.nx, args.reso, buff=args.buff, seed=args.nsim*i)
 			data_ddtot = data_dd + data_ndd
@@ -222,16 +230,22 @@ def main(args):
 			data_ggtot = data_gg
 
 		# Deflection => convergence
-		DD = FlatMapReal(args.nx, args.reso, map=data_ddtot)
+		DD = FlatMapReal(args.nx, args.reso, map=data_ddtot, mask=mask)
 		KK = DD.FilterMap(lambda l: np.sqrt(l*(l+1))/2., padX=2, array=False)
 		GG = FlatMapReal(args.nx, args.reso, map=data_ggtot, mask=mask)
 		KK.mask = mask
-		
+		# plt.subplot(121);plt.imshow(data_kk*KK.mask, vmin=-0.2, vmax=0.2);plt.colorbar()
+		# plt.subplot(122);plt.imshow(KK.map*KK.mask, vmin=-0.2, vmax=0.2);plt.colorbar()
+		# plt.show()
+
+		# Want some smoothies?
 		if args.smooth != 0: 
 			KK.ApplyGaussBeam(args.smooth)
 			GG.ApplyGaussBeam(args.smooth)
+			DD.ApplyGaussBeam(args.smooth)
 		
 		if args.pad != 0: 
+			DD = DD.Pad(args.pad, apo_mask=False)
 			KK = KK.Pad(args.pad, apo_mask=False)#, fwhm=args.smooth_pad)
 			GG = GG.Pad(args.pad, apo_mask=False)#, fwhm=args.smooth_pad)
 			# X = GG.map*GG.mask
@@ -248,13 +262,23 @@ def main(args):
 
 		# embed()
 
+		# FT_DD     = FlatMapFFT(nx, args.reso, map=DD)
 		FT_KK     = FlatMapFFT(nx, args.reso, map=KK)
-		FT_GG     = FlatMapFFT(nx, args.reso, map=GG)
+		# FT_GG     = FlatMapFFT(nx, args.reso, map=GG)
 		
 		# lb, clkk_ = FT_KK.GetCl(lbins=bins)
+		# lb, cldd_ = FT_DD.GetCl(lbins=bins, prefact=lambda l:l*(l+1)/4.)
 		# lb, clgg_ = FT_GG.GetCl(lbins=bins)
 		lb, clkg_ = FT_KK.GetCl(lbins=bins, map2=GG)
+		# lb, clkg_ = FT_DD.GetCl(lbins=bins, map2=GG, prefact=lambda l: np.sqrt(l*(l+1))/2.)
 		
+		# plt.plot(lb, cldd_, '--')
+		# plt.plot(lb, clkk_, '-')#, lw=0.3)
+		# plt.plot(l, clkk, ':')
+		# plt.show()
+		# if i >20:
+		# 	plt.show()
+		# 	sys.exit()
 		# CLKK.append(clkk_)
 		# CLGG.append(clgg_)
 		CLKG.append(clkg_)
@@ -291,7 +315,7 @@ def main(args):
 	# Plots ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 	# do_plot('kk', lb, CLKK, clkk_mean, clkk_err, clkk, Bin.bin_spectra(clkk*bl**2))
 	# do_plot('gg', lb, CLGG, clgg_mean, clgg_err, clgg, Bin.bin_spectra(clgg*bl**2))
-	do_plot('kg', lb, CLKG, clkg_mean, clkg_err, clkg, Bin.bin_spectra(clkg*bl**2))
+	do_plot('kg', lb, CLKG, clkg_mean, clkg_err, clkg*bl**2, Bin.bin_spectra(clkg*bl**2))
 
 	plt.imshow(np.corrcoef(CLKG.T), interpolation='nearest', cmap='RdBu', vmin=-1., vmax=1.)
 	plt.colorbar()

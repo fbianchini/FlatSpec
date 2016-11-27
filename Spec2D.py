@@ -4,6 +4,7 @@ from scipy import ndimage
 import matplotlib.pyplot as plt
 from Utils import *
 
+from IPython import embed
 # Here you can find some classes to deal with flat-sky scalar maps 
 # (like temperature, lensing, galaxies,..) and their FFTs.
 # The following code is heavily inspired from some of Duncan's quicklens code 
@@ -210,7 +211,10 @@ class FlatMapReal(Pix):
 
 	def FilterMap(self, filt, padX=2, array=True, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
 		if padX != 1:
-			newmap = self.Pad(padX, apo_mask=True)
+			if np.all(self.mask != np.ones(self.shape)):
+				newmap = self.Pad(padX, apo_mask=False)
+			else:
+				newmap = self.Pad(padX, apo_mask=True)
 		else:
 			newmap = self.Copy()
 
@@ -220,13 +224,15 @@ class FlatMapReal(Pix):
 		else:
 			assert (filt.shape == newmap.map.shape)
 
-		FT = FlatMapFFT(newmap.map.shape[0], newmap.dx*rad2arcmin, map=newmap)
+		# FT = FlatMapFFT(newmap.map.shape[0], newmap.dx*rad2arcmin, map=newmap)
+		FT = FlatMapFFT(newmap.map.shape[0], newmap.dx*rad2arcmin, ft=np.fft.fft2(newmap.map))
 
-		filtmap =  FT.FT2Map(filt=filt, array=array, lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
+		filtmap = FT.FT2Map(filt=filt, array=array, lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
+		# filtmap.mask = self.mask
 
 		if array:
 			if padX != 1:
-				filtmap = filtmap[self.nx/2.*(padX-1):self.nx/2.*(padX+1.)]
+				filtmap = filtmap[self.nx/2.*(padX-1):self.nx/2.*(padX+1.),self.nx/2.*(padX-1):self.nx/2.*(padX+1.)]
 		else:
 			if padX	!= 1:
 				filtmap = filtmap.Extract([int(self.nx/2.*(padX-1.)),int(self.nx/2.*(padX+1.)),int(self.nx/2.*(padX-1.)),int(self.nx/2.*(padX+1.))])
@@ -262,7 +268,7 @@ class FlatMapFFT(Pix):
 			else:
 				assert( self.Compatible(map) ) 
 				self.map = map
-				self.ft  = np.fft.fft2(map.map*map.mask) 
+				self.ft  = np.fft.fft2(map.map*map.mask)#/np.mean(map.mask**2) 
 		else:
 			self.ft  = ft
 			self.map = self.FT2Map(ft=self.ft)
@@ -312,8 +318,6 @@ class FlatMapFFT(Pix):
 
 		mask = self.GetLMask(lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
 		filt *= mask.astype(filt.dtype) 
-
-		# ft   *= filt
 
 		if array:
 			return np.fft.ifft2(ft*filt).real
@@ -469,7 +473,6 @@ def J(k1, k2, k3):
 	J_[np.isnan(J_)] = 0.0
 
 	return J_
-
 
 def GetMll(mask, reso, lbins=None, delta_ell=None, npts=5000):
 	"""

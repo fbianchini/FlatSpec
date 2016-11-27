@@ -134,8 +134,7 @@ def GenPoissNoise(mean, nx, dx, ny=None, dy=None, dim='pix'):
  	#     noise_bar = np.mean(noise_map)
  	#     delta_map = (noise_map - noise_bar)/noise_bar
  	#     delta_map[noise_map < -1.] = -1.
-
- 	return float(noise_map)
+ 	return noise_map*1.
 
 def GetCountsTot(mapgg, mean, nx, dx, ny=None, dy=None, dim='pix'):
 	"""
