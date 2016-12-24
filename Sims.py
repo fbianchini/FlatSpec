@@ -121,7 +121,7 @@ def GenPoissNoise(mean, nx, dx, ny=None, dy=None, dim='pix'):
  	# Converting to avg per pixel
  	if dim == 'pix':
  		pass
- 	if dim == 'ster':
+ 	if dim == 'ster' or dim == 'sterad' or dim == 'steradian':
  	    mean = mean * pix.dx * pix.dy
  	elif dim == 'arcmin':
  	    mean = mean * (pix.dx * pix.dy) / (np.pi / 180. / 60.)

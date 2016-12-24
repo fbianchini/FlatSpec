@@ -1,10 +1,14 @@
 import numpy as np
-import sys
+import sys, gzip
 from scipy import ndimage
 import matplotlib.pyplot as plt
 from Utils import *
-
+from scipy.linalg import pinv2
+import cPickle as pickle
 from IPython import embed
+sys.path.append('../CurvSpec/')
+from master import Binner
+
 # Here you can find some classes to deal with flat-sky scalar maps 
 # (like temperature, lensing, galaxies,..) and their FFTs.
 # The following code is heavily inspired from some of Duncan's quicklens code 
@@ -24,6 +28,34 @@ def GaussSmooth(map, fwhm, reso, order=0):
 	sigma  = fwhm / np.sqrt(8*np.log(2)) / reso
 	# print("\t smoothing map with sigma = %4f" %sigma)
 	return ndimage.gaussian_filter(map, sigma=sigma, order=order)
+
+def GetBins(lbins=None, delta_ell=None, lmin=None, lmax=None):
+	"""
+	Returns binning scheme by providing either:
+	i)  list w/ bins edges or;
+	ii) delta_ell and/or {lmin, lmax} 
+
+	Outputs
+	-------
+	i)   ell_bins : list of bins
+	ii)  lbins    : bins_edges
+	iii) nbins    : # of bins
+	"""
+	if lbins is None:
+		if lmin is None:
+			lmin = 0
+		if (delta_ell is None) and (lmin != 0):
+			delta_ell = 2 * lmin # Minimun bins bandwith: suggested in PoKER paper (astro-ph:1111.0766v1)
+		else:
+			delta_ell = 1.
+		nbins    = int(np.ceil(np.max(lmax / delta_ell))) # number of bins
+		ell_bins = np.asarray([ [delta_ell*i+lmin, delta_ell*(i+1)+lmin] for i in xrange(nbins)]) 
+		lbins    = np.append(ell_bins[:,0], [ell_bins[-1,1]]) # bins edges
+	else:
+		nbins    = len(lbins) - 1
+		ell_bins = np.asarray([[lbins[i], lbins[i+1]] for i in xrange(nbins)])
+
+	return ell_bins, lbins, nbins
 
 
 class Pix(object):
@@ -225,9 +257,8 @@ class FlatMapReal(Pix):
 			assert (filt.shape == newmap.map.shape)
 
 		# FT = FlatMapFFT(newmap.map.shape[0], newmap.dx*rad2arcmin, map=newmap)
-		FT = FlatMapFFT(newmap.map.shape[0], newmap.dx*rad2arcmin, ft=np.fft.fft2(newmap.map))
-
-		filtmap = FT.FT2Map(filt=filt, array=array, lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
+		FT      = FlatMapFFT(newmap.map.shape[0], newmap.dx*rad2arcmin, ft=np.fft.fft2(newmap.map))
+		filtmap = FT.Fourier2Map(filt=filt, array=array, lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
 		# filtmap.mask = self.mask
 
 		if array:
@@ -268,11 +299,11 @@ class FlatMapFFT(Pix):
 			else:
 				assert( self.Compatible(map) ) 
 				self.map = map
-				self.ft  = np.fft.fft2(map.map*map.mask)#/np.mean(map.mask**2) 
+				self.ft  = np.fft.fft2(map.map*map.mask)#/np.mean(map.mask**2)  # FIXME: should I multiply for FFT norm?
 		else:
 			self.ft  = ft
-			self.map = self.FT2Map(ft=self.ft)
-			# What about the mask?
+			self.map = self.Fourier2Map(ft=self.ft)
+			# FIXME: What about the mask?
 
 		assert( (self.ny, self.nx) == self.ft.shape )
 
@@ -303,7 +334,7 @@ class FlatMapFFT(Pix):
 		if lymax != None: mask[ np.where(np.abs(ly) >=lymax) ] = 0.0
 		return mask
 
-	def FT2Map(self, ft=None, filt=None, array=True, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
+	def Fourier2Map(self, ft=None, filt=None, array=True, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
 		""" 
 		Returns the FlatMapReal associated to this FT. 
 		- array: return just the 2d array containing the map?
@@ -340,7 +371,7 @@ class FlatMapFFT(Pix):
 		else:
 			return FlatMapFFT(self.nx, self.dx, ft=ft*filt, ny=self.ny, dy=self.dy)
 
-	def Get2DSpectra(self, map1=None, map2=None, plot2D=False, shift=True):
+	def Get2DSpectra(self, map1=None, map2=None, plot2D=False, MASTER=False, shift=True):
 		""" 
 		Returns the (centered) 2d FT of a given map.
 
@@ -363,7 +394,14 @@ class FlatMapFFT(Pix):
 
 		# Creating common mask 
 		mask = map1.mask * map2.mask
-		fsky = np.mean(mask**2.) # ! Not to be confused with the sky coverage of the *patch* given by Pix object, i.e. self.fsky
+		# w2 = np.mean(mask**2)
+		# w4 = np.mean(mask**4)
+		# fac = w2**2/w4 * (2*np.pi/40.)**2# [(w_2^2/w_4)*(2*pi/Delta_L)^2]
+
+		if not MASTER:
+			fsky = np.mean(mask**2.)#**2/np.mean(mask**4) # ! Not to be confused with the sky coverage of the *patch* given by Pix object, i.e. self.fsky
+		else:
+			fsky = 1. # Calculate the masking effect at a later time w/ the mode-coupling matrix
 
 		fft1 = np.fft.fftshift(np.fft.fft2(map1.map*mask))
 		fft2 = np.fft.fftshift(np.fft.fft2(map2.map*mask))
@@ -384,7 +422,7 @@ class FlatMapFFT(Pix):
 		if shift:
 			return fft_
 		else:
-			return np.fft.fftshift(fft_)
+			return np.fft.fftshift(fft_) # FIXME: should probably be ifftshift
 
 	def Bin2DSpectra(self, ft=None, lbins=None, delta_ell=None, prefact=None, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
 		""" 
@@ -397,17 +435,9 @@ class FlatMapFFT(Pix):
 		L = self.GetL()
 
 		# Setup the bins if not provided
-		if lbins is None:
-			lmin_ = int(np.ceil(2 * np.pi / np.sqrt(self.dx * self.nx * self.ny * self.dy))) # Set by patch size
-			#lmax = int(np.ceil(np.pi / self.dx)) # ! Just an approx: assumes same-size pixels 
-			if delta_ell is None:
-				delta_ell = 2 * lmin # Minimun bins bandwith: suggested in PoKER paper (astro-ph:1111.0766v1)
-			nbins    = int(np.ceil(np.max(L / delta_ell))) # number of bins
-			ell_bins = np.asarray([ [delta_ell*i+lmin_, delta_ell*(i+1)+lmin_] for i in xrange(nbins)]) 
-			lbins    = np.append(ell_bins[:,0], [ell_bins[-1,1]]) # bins edges
-		else:
-			nbins    = len(lbins) - 1
-			ell_bins = np.asarray([[lbins[i], lbins[i+1]] for i in xrange(nbins)])
+		Lmin = int(np.ceil(2 * np.pi / np.sqrt(self.dx * self.nx * self.ny * self.dy))) # Set by patch size
+		Lmax = np.max(L)
+		ell_bins, lbins, nbins = GetBins(lbins=lbins, delta_ell=delta_ell, lmin=Lmin, lmax=Lmax) 
 
 		# Flattening factors
 		if prefact == None:
@@ -415,7 +445,8 @@ class FlatMapFFT(Pix):
 		else:
 		    prefact = prefact(L)
 
-		ell_mask = self.GetLMask(lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
+		# Discard multipoles (in both or single directions l_x, l_y) before averaging
+		ell_mask = self.GetLMask(shift=True, lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
 
 		av_cls, bins     = np.histogram(L, bins=lbins, weights=ft*prefact*ell_mask)
 		av_weights, bins = np.histogram(L, bins=lbins, weights=ell_mask)
@@ -426,96 +457,44 @@ class FlatMapFFT(Pix):
 
 		return lb, cl.real
 
-	def GetCl(self, map1=None, map2=None, lbins=None, delta_ell=None, prefact=None, plot2D=False, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
+	def GetCl(self, map1=None, map2=None, lbins=None, delta_ell=None, prefact=None,
+					MASTER=False, mll=None, fmask=None, plot2D=False, 
+					lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
 		"""
 		Returns 1D power spectrum.
 		"""
 		if map1 is None:
 			map1 = self.map
+			assert (self.Compatible(map1))
 
-		fft2d  = self.Get2DSpectra(map1=map1, map2=map2, plot2D=plot2D)
+		if map2 is None:
+			map2 = map1
+			assert( self.Compatible(map2) )
+
+		fft2d = self.Get2DSpectra(map1=map1, map2=map2, plot2D=plot2D, MASTER=MASTER)
+
+		if MASTER:
+			if mll is None:
+				try:
+					Mll = pickle.load(gzip.open(fmask, "rb"))
+				except:
+					print("!!! Mll not valid !!!")
+					print("!!! Input Mll or valid filename !!!")
+					sys.exit()
+			else:
+				Mll = mll.copy()
+
+			assert( Mll.shape[0] >= lbins[-1]+1 )
+
+			# Bin the coupling matrix
+			Bin = Binner(bin_edges=lbins)#, flat=prefact)
+			Mbb = np.dot(np.dot(Bin.P_bl, Mll), Bin.Q_lb)
+
 		lb, cl = self.Bin2DSpectra(fft2d, lbins=lbins, delta_ell=delta_ell, prefact=prefact, lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
 
-		return lb, cl
-
-def J(k1, k2, k3):	
-	"""
-	Computes the J function as defined in Eq.(A10) of MASTER paper (astro-ph/0105302)
-	- k1 and k2 are numbers
-	- k3 can be number/array
-	"""
-	k1 = np.asarray(k1, dtype=np.double)
-	k2 = np.asarray(k2, dtype=np.double)
-	k3 = np.asarray(k3, dtype=np.double)
-
-	d  = np.broadcast(k1,k2,k3)
-	J_ = np.zeros(d.shape)
-	
-	# Indices where J function is different from zero
-	# idx = np.where((k1 < k2 + k3) & (k1 > np.abs(k2 - k3)))[0]
-	idx1 = np.where(k1 > np.abs(k2-k3))[0]
-	idx2 = np.where(k1 < k2+k3)[0]
-	idx  = np.intersect1d(idx1,idx2)
-
-	tmp = 2*k1**2*k2**2 + 2*k1**2*k2**2 + 2*k2**2*k3**2 - k1**4 - k2**4 - k3**4
-
-	# print k1, k2, k3[idx], np.min(tmp[idx])
-
-
-	if J_.ndim > 0: # J_ is an array
-		J_[idx] = 2.0 / np.pi / np.sqrt(tmp[idx])
-	else: # J_ is a number
-		if idx.size > 0:
-			J_ = 2.0 / np.pi / np.sqrt(tmp)
+		if MASTER:
+			cb = np.dot(pinv2(Mbb), cl)
 		else:
-			J_ = 0.0
-	
-	J_[np.isnan(J_)] = 0.0
+			cb = cl
 
-	return J_
-
-def GetMll(mask, reso, lbins=None, delta_ell=None, npts=5000):
-	"""
-	Returns the mode-coupling matrix from MASTER paper (astro-ph/0105302).
-	Here k-vectors are already converted into l-vectors, while the paper uses wavenumber, hence the differences.
-	The integral over the mask power spectrum is computed by means of Chebyschev-Gauss quadrature.
-	"""
-	assert ( len(mask.shape) == 2 )
-
-	if lbins is None:
-		if delta_ell is None:
-			delta_ell = 10					
-		nbins    = int(np.ceil(np.max(4000/ delta_ell))) # number of bins
-		ell_bins = np.asarray([ [delta_ell*i, delta_ell*(i+1)] for i in xrange(nbins)]) 
-		lbins    = np.append(ell_bins[:,0], [ell_bins[-1,1]]) # bins edges
-	else:
-		nbins    = len(lbins) - 1
-		ell_bins = np.asarray([[lbins[i], lbins[i+1]] for i in xrange(nbins)])
-
-	m_ = FlatMapReal(mask.shape[1], reso, ny=mask.shape[0], dy=reso, map=mask)
-	m  = FlatMapFFT(mask.shape[1], reso, ny=mask.shape[0], dy=reso, map=m_)
-
-	# Calculating mask 1D power spectrum W(l)
-	l3, Wl = m.GetCl(lbins=lbins)
-
-	l1 = np.mean(ell_bins,axis=-1)
-	l2 = np.mean(ell_bins,axis=-1)
-
-	M_out = np.empty([l1.size,l2.size])
-
-	# CG quadrature points & weights
-	wi  = np.pi / npts
-	tmp = (2.*(np.arange(1,npts+1)-1)) / (2.*npts) * np.pi
-	vi  = np.cos(tmp)
-
-	for i in xrange(l1.size):
-		for j in xrange(l2.size):
-			v    = (l3**2 - l1[i]**2 - l2[j]**2) / (2.0*l1[i]*l2[j])
-			fv   = Wl
-			fvi  = np.interp(vi,v,fv, left=0., right=0.)
-			tmp2 = np.sum(wi*fvi)
-
-			# TODO: should I multiply for \Delta k_2??
-			M_out[i,j] = l2[j]/(2.*np.pi)  * tmp2 
-
-	return np.nan_to_num(M_out)
+		return lb, cb
