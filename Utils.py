@@ -2,8 +2,9 @@ import numpy as np
 import scipy.signal
 
 def fn_apodize(MAP, mapparams, apodmask='circle', edge_apod=2, min_kernel_size=10):
-
 	"""
+	!! Srini's routine !!
+	
 	MAP = input map to be apodized
 	mapparams = [nx, ny, dx, dy] (nx, ny is normally MAP.shape)
 	mask = circlular / square
@@ -47,8 +48,9 @@ def fn_apodize(MAP, mapparams, apodmask='circle', edge_apod=2, min_kernel_size=1
 	return apodMASKf * MAP
 
 def fn_psource_mask(MAP, mapparams, coords, disc_rad = None, min_kernel_size = 10):
-
 	"""
+	!! Srini's routine !!
+
 	MAP - input map
 	mapparams = [nx, ny, dx, dy] (nx, ny is normally MAP.shape)
 	coords - (x,y) pixel coords
