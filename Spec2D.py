@@ -6,8 +6,7 @@ from Utils import *
 from scipy.linalg import pinv2
 import cPickle as pickle
 from IPython import embed
-sys.path.append('../CurvSpec/')
-from master import Binner
+from curvspec.master import Binner
 
 # Here you can find some classes to deal with flat-sky scalar maps 
 # (like temperature, lensing, galaxies,..) and their FFTs.

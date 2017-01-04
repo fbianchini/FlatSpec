@@ -10,9 +10,20 @@ import healpy as hp
 import scipy.signal
 from tqdm import tqdm
 import cPickle as pickle
+import gzip
 
 arcmin2rad = np.pi / 180. / 60. 
 rad2arcmin = 1./arcmin2rad
+
+def Cnt2DltApo(cnt, mask, reso=2., thr=1e-14, ngal=False):
+	dlt = np.zeros(cnt.shape)
+	ngal_pix = np.sum(cnt*mask)/np.sum(mask)
+	dlt = cnt / ngal_pix - 1.
+	ngal = ngal_pix * (reso*arcmin2rad)**2
+	# if ngal == True:
+	# 	return dlt, ngal, ngal_pix
+	# else: 
+	return dlt
 
 def main(args):
 
@@ -77,7 +88,8 @@ def main(args):
 			data_nkk   = GenCorrFlatMaps(nlkk/15., args.nx, args.reso, buff=args.buff, seed=args.nsim*i)
 			data_kktot = data_kk + data_nkk
 			data_ggtot = GetCountsTot(data_gg, 5e6, args.nx, args.reso, dim='sterad') # Hard-coded H-ATLAS galaxy density in gal/steradian
-			data_ggtot = data_ggtot/data_ggtot.mean() - 1. # To delta_g
+			data_ggtot = Cnt2DltApo(data_ggtot, mask)
+			# data_ggtot = data_ggtot/data_ggtot.mean() - 1. # To delta_g
 		else:
 			data_kktot = data_kk
 			data_ggtot = data_gg
