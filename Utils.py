@@ -1,5 +1,160 @@
 import numpy as np
 import scipy.signal
+import scipy.interpolate
+
+arcmin2rad = np.pi / 180. / 60. 
+rad2arcmin = 1./arcmin2rad
+
+def GaussSmooth(map, fwhm, reso, order=0):
+	"""
+	Smooth the map with a Gaussian beam specified by its FWHM (in arcmin).
+	- fwhm: 
+	- reso: pixel resolution (in arcmin)
+	"""
+	# reso_  = reso * 180.*60./np.pi # in arcmin
+	sigma  = fwhm / np.sqrt(8*np.log(2)) / reso
+	# print("\t smoothing map with sigma = %4f" %sigma)
+	return ndimage.gaussian_filter(map, sigma=sigma, order=order)
+
+def GetBins(lbins=None, delta_ell=None, lmin=None, lmax=None):
+	"""
+	Returns binning scheme by providing either:
+	i)  list w/ bins edges or;
+	ii) delta_ell and/or {lmin, lmax} 
+
+	Outputs
+	-------
+	i)   ell_bins : list of bins
+	ii)  lbins    : bins_edges
+	iii) nbins    : # of bins
+	"""
+	if lbins is None:
+		if lmin is None:
+			lmin = 0
+		if (delta_ell is None) and (lmin != 0):
+			delta_ell = 2 * lmin # Minimun bins bandwith: suggested in PoKER paper (astro-ph:1111.0766v1)
+		else:
+			delta_ell = 1.
+		nbins    = int(np.ceil(np.max(lmax / delta_ell))) # number of bins
+		ell_bins = np.asarray([ [delta_ell*i+lmin, delta_ell*(i+1)+lmin] for i in xrange(nbins)]) 
+		lbins    = np.append(ell_bins[:,0], [ell_bins[-1,1]]) # bins edges
+	else:
+		nbins    = len(lbins) - 1
+		ell_bins = np.asarray([[lbins[i], lbins[i+1]] for i in xrange(nbins)])
+
+	return ell_bins, lbins, nbins
+
+def GetLxLy(nx, dx, ny=None, dy=None, shift=False):
+    """ 
+    Returns two grids with the (lx, ly) pair associated with each Fourier mode in the map. 
+    If shift=True , \ell = 0 is centered in the grid
+    ~ Note: already multiplied by 2\pi 
+    """
+    if ny is None: ny = nx
+    if dy is None: dy = dx
+    
+    dx *= arcmin2rad
+    dy *= arcmin2rad
+    
+    if shift:
+        return np.meshgrid( np.fft.fftshift(np.fft.fftfreq(nx, dx))*2.*np.pi, np.fft.fftshift(np.fft.fftfreq(ny, dy))*2.*np.pi )
+    else:
+        return np.meshgrid( np.fft.fftfreq(nx, dx)*2.*np.pi, np.fft.fftfreq(ny, dy)*2.*np.pi )
+
+def GetL(nx, dx, ny=None, dy=None, shift=False):
+    """ 
+    Returns a grid with the wavenumber l = \sqrt(lx**2 + ly**2) for each Fourier mode in the map. 
+    If shift=True, \ell = 0 is centered in the grid
+    """
+    lx, ly = GetLxLy(nx, dx, ny=ny, dy=dy, shift=shift)
+    return np.sqrt(lx**2 + ly**2)
+
+def GetLxLyAngle(nx, dx, ny=None, dy=None, shift=False):
+	""" 
+	Returns a grid with the angle between Fourier mode in the map. 
+	If shift=True (default), \ell = 0 is centered in the grid
+	~ Note: already multiplied by 2\pi 
+	"""
+	lx, ly = GetLxLy(nx, dx, ny=ny, dy=dy, shift=shift)
+	return 2*np.arctan2(lx, -ly)
+
+def Interpolate2D(nx, dx, l, cl, dy=None, ny=None, shift=False):
+    """ 
+    Returns a function cl interpolated on the 2D L plane.
+    If shift=True (default), \ell = 0 is centered in the grid
+    """
+    if ny is None: ny = nx
+    if dy is None: dy = dx
+ 
+    L = GetL(nx, dx, ny=ny, dy=dy, shift=shift)
+    CL = np.interp(L, l, cl)
+
+    return CL
+
+def EB2QU(E, B, dx):
+	# E and B are 2D arrays of same shape containing E and B maps
+	assert E.shape == B.shape
+	nx = E.shape[0]
+	ny = E.shape[1]
+	angle = GetLxLyAngle(nx, dx, ny=ny, dy=dx, shift=False)
+
+	efft = np.fft.fft2(E)
+	bfft = np.fft.fft2(B)
+
+	Q = np.fft.ifft2( np.cos(angle) * efft - np.sin(angle) * bfft ).real
+	U = np.fft.ifft2( np.sin(angle) * efft + np.cos(angle) * bfft ).real
+
+	return Q, U
+
+def QU2EB(Q, U, dx):
+	# Q and U are 2D arrays of same shape containing Q and U maps
+	assert Q.shape == U.shape
+	nx = Q.shape[0]
+	ny = U.shape[1]
+	angle = GetLxLyAngle(nx, dx, ny=ny, dy=dx, shift=False)
+
+	qfft = np.fft.fft2(Q)
+	ufft = np.fft.fft2(U)
+
+	E = np.fft.ifft2( np.cos(angle) * qfft + np.sin(angle) * ufft ).real
+	B = np.fft.ifft2(-np.sin(angle) * qfft + np.cos(angle) * ufft ).real
+
+	return E, B
+
+
+def LensMe( mymap, phimap, psi=0.0 ):
+    """ perform the remapping operation of lensing in the flat-sky approximation.
+         tqumap         = unlensed tqumap object to sample from.
+         phifft         = phi field to calculate the deflection d=\grad\phi from.
+         (optional) psi = angle to rotate the deflection field by, in radians (e.g. psi=pi/2 results in phi being treated as a curl potential).
+    """
+    assert( mymap.Compatible(phimap) )
+
+    nx, ny = phimap.nx, phimap.ny
+    dx, dy = phimap.dx, phimap.dy
+
+    # lx, ly = np.meshgrid( np.fft.fftfreq( nx, dx )[0:nx/2+1]*2.*np.pi, np.fft.fftfreq( ny, dy )*2.*np.pi )
+    lx, ly = np.meshgrid( np.fft.fftfreq( nx, dx )*2.*np.pi, np.fft.fftfreq( ny, dy )*2.*np.pi )
+
+    pfft   = np.fft.fft2(phimap.map)
+
+    # deflection field
+    x, y   = np.meshgrid( np.arange(0,nx)*dx, np.arange(0,ny)*dy )
+    gpx    = np.fft.ifft2( pfft * lx * -1.j)# * np.sqrt( (nx*ny)/(dx*dy) ) )
+    gpy    = np.fft.ifft2( pfft * ly * -1.j)# * np.sqrt( (nx*ny)/(dx*dy) ) )
+
+    if psi != 0.0:
+        gp = (gpx + 1.j*gpy)*np.exp(1.j*psi)
+        gpx = gp.real
+        gpy = gp.imag
+
+    lxs    = (x+gpx).flatten(); del x, gpx
+    lys    = (y+gpy).flatten(); del y, gpy
+
+    # interpolate
+    mymap_lensed = scipy.interpolate.RectBivariateSpline( np.arange(0,ny)*dy, np.arange(0,nx)*dx, mymap.map ).ev(lys, lxs).reshape([ny,nx])
+
+    return mymap_lensed
 
 def fn_apodize(MAP, mapparams, apodmask='circle', edge_apod=2, min_kernel_size=10):
 	"""
@@ -90,7 +245,6 @@ def fn_psource_mask(MAP, mapparams, coords, disc_rad = None, min_kernel_size = 1
 	#imshow(MASK);colorbar();show();quit()
 
 	return MAP * MASK
-
 
 def smooth_window(win,ker_size=16):
 	'''Smooth input window so that it and its gradients vanish on the boundary region. This 

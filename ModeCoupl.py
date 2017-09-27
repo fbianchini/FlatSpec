@@ -4,11 +4,12 @@ from scipy import ndimage
 import matplotlib.pyplot as plt
 from Utils import *
 from Spec2D import *
+from Sims import *
 from scipy.linalg import pinv2
 import cPickle as pickle
 from IPython import embed
-sys.path.append('../CurvSpec/')
-from master import Binner
+from curvspec.master import Binner
+from tqdm import tqdm
 
 def J(k1, k2, k3):	
 	"""
@@ -85,3 +86,30 @@ def GetMll(mask, reso, lmin=0, lmax=4000, npts=4000):
 			M_out[i,j] = l2[j]/(2.*np.pi)  * tmp2
 
 	return np.nan_to_num(M_out)
+
+def GetMllCooray(mask, nx, reso, bins, nsim=100, buff=1):
+
+	Mll = np.zeros((len(bins)-1,len(bins)-1))
+
+	for ib in xrange(len(bins)-1):
+		cl = np.zeros(1e4)
+		cl[bins[ib]:bins[ib+1]+1] = 1.
+
+		# plt.plot(cl)
+		# plt.show()
+
+		CL = np.zeros(len(bins)-1)
+
+		for i in tqdm(xrange(nsim)):
+			fake = GenCorrFlatMaps(cl, nx, reso, buff=buff)
+			FAKE = FlatMapReal(nx, reso, map=fake, mask=mask)
+			FT_FAKE = FlatMapFFT(nx, reso, map=FAKE)
+			lb, clb = FT_FAKE.GetCl(lbins=bins)
+			clb *= np.mean(mask**2)
+			# plt.plot(lb, clb)
+			# plt.show()
+			CL[:] += clb
+
+		Mll[:,ib] = CL/nsim
+
+	return Mll

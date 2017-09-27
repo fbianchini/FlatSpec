@@ -70,9 +70,7 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 			sys.exit()
 		C = np.nan_to_num(np.sqrt(C_))
 	
-	if seed == None:
-		np.random.seed(0)
-	else:
+	if seed is not None:
 		np.random.seed(seed)
 
 	# Generating random Fourier maps 
@@ -102,6 +100,13 @@ def GenCorrFlatMaps(cls, nx, dx, ny=None, dy=None, buff=1, seed=None):
 		# plt.colorbar()
 		# plt.show()
 		return mapX
+
+def GenNoiseFromDepth(depth):
+	"""
+	Routine to generate a noise map given the depth map (std of noise in pixels).
+	"""
+	ny, nx = depth.shape
+	return depth * np.random.randn(ny*nx).reshape((ny,nx))
 
 def GenPoissNoise(mean, nx, dx, ny=None, dy=None, dim='pix'):
 	"""

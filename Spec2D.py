@@ -17,46 +17,6 @@ from curvspec.master import Binner
 arcmin2rad = np.pi / 180. / 60. 
 rad2arcmin = 1./arcmin2rad
 
-def GaussSmooth(map, fwhm, reso, order=0):
-	"""
-	Smooth the map with a Gaussian beam specified by its FWHM (in arcmin).
-	- fwhm: 
-	- reso: pixel resolution (in arcmin)
-	"""
-	# reso_  = reso * 180.*60./np.pi # in arcmin
-	sigma  = fwhm / np.sqrt(8*np.log(2)) / reso
-	# print("\t smoothing map with sigma = %4f" %sigma)
-	return ndimage.gaussian_filter(map, sigma=sigma, order=order)
-
-def GetBins(lbins=None, delta_ell=None, lmin=None, lmax=None):
-	"""
-	Returns binning scheme by providing either:
-	i)  list w/ bins edges or;
-	ii) delta_ell and/or {lmin, lmax} 
-
-	Outputs
-	-------
-	i)   ell_bins : list of bins
-	ii)  lbins    : bins_edges
-	iii) nbins    : # of bins
-	"""
-	if lbins is None:
-		if lmin is None:
-			lmin = 0
-		if (delta_ell is None) and (lmin != 0):
-			delta_ell = 2 * lmin # Minimun bins bandwith: suggested in PoKER paper (astro-ph:1111.0766v1)
-		else:
-			delta_ell = 1.
-		nbins    = int(np.ceil(np.max(lmax / delta_ell))) # number of bins
-		ell_bins = np.asarray([ [delta_ell*i+lmin, delta_ell*(i+1)+lmin] for i in xrange(nbins)]) 
-		lbins    = np.append(ell_bins[:,0], [ell_bins[-1,1]]) # bins edges
-	else:
-		nbins    = len(lbins) - 1
-		ell_bins = np.asarray([[lbins[i], lbins[i+1]] for i in xrange(nbins)])
-
-	return ell_bins, lbins, nbins
-
-
 class Pix(object):
 	""" 
 	Class that contains the pixelization scheme (considers rectangular pixels).
@@ -99,6 +59,14 @@ class Pix(object):
 		else:
 			return np.meshgrid( np.fft.fftfreq(self.nx, self.dx)*2.*np.pi, np.fft.fftfreq(self.ny, self.dy)*2.*np.pi )
 
+	def GetLxLyAngle(self, shift=True):
+		""" 
+		Returns a grid with the angle between L and the lx axis. 
+		If shift=True (default), \ell = 0 is centered in the grid
+		~ Note: already multiplied by 2\pi 
+		"""
+		lx, ly = self.GetLxLy(shift=shift)
+		return 2*np.arctan2(lx, -ly)
 
 	def GetL(self, shift=True):
 		""" 
@@ -241,6 +209,7 @@ class FlatMapReal(Pix):
 		plt.show()
 
 	def FilterMap(self, filt, padX=2, array=True, lmin=None, lmax=None, lxmin=None, lxmax=None, lymin=None, lymax=None):
+		
 		if padX != 1:
 			if np.all(self.mask != np.ones(self.shape)):
 				newmap = self.Pad(padX, apo_mask=False)
@@ -252,8 +221,8 @@ class FlatMapReal(Pix):
 		if callable(filt):
 			L = newmap.GetL(shift=False)
 			filt = filt(L) 
-		else:
-			assert (filt.shape == newmap.map.shape)
+		elif len(filt.shape) == 2: # 1d array (l, F_l)
+			filt = Interpolate2D(newmap.nx, newmap.dx*rad2arcmin, filt[0], filt[1], dy=newmap.dy*rad2arcmin, ny=newmap.ny, shift=False)
 
 		# FT = FlatMapFFT(newmap.map.shape[0], newmap.dx*rad2arcmin, map=newmap)
 		FT      = FlatMapFFT(newmap.map.shape[0], newmap.dx*rad2arcmin, ft=np.fft.fft2(newmap.map))
@@ -397,10 +366,10 @@ class FlatMapFFT(Pix):
 		# w4 = np.mean(mask**4)
 		# fac = w2**2/w4 * (2*np.pi/40.)**2# [(w_2^2/w_4)*(2*pi/Delta_L)^2]
 
-		if not MASTER:
-			fsky = np.mean(mask**2.)#**2/np.mean(mask**4) # ! Not to be confused with the sky coverage of the *patch* given by Pix object, i.e. self.fsky
-		else:
+		if MASTER:
 			fsky = 1. # Calculate the masking effect at a later time w/ the mode-coupling matrix
+		else:
+			fsky = np.mean(mask**2.)#**2/np.mean(mask**4) # ! Not to be confused with the sky coverage of the *patch* given by Pix object, i.e. self.fsky
 
 		fft1 = np.fft.fftshift(np.fft.fft2(map1.map*mask))
 		fft2 = np.fft.fftshift(np.fft.fft2(map2.map*mask))
@@ -472,27 +441,28 @@ class FlatMapFFT(Pix):
 
 		fft2d = self.Get2DSpectra(map1=map1, map2=map2, plot2D=plot2D, MASTER=MASTER)
 
-		if MASTER:
-			if mll is None:
-				try:
-					Mll = pickle.load(gzip.open(fmask, "rb"))
-				except:
-					print("!!! Mll not valid !!!")
-					print("!!! Input Mll or valid filename !!!")
-					sys.exit()
-			else:
-				Mll = mll.copy()
+		# if MASTER:
+			# if mll is None:
+			# 	try:
+			# 		Mll = pickle.load(gzip.open(fmask, "rb"))
+			# 	except:
+			# 		print("!!! Mll not valid !!!")
+			# 		print("!!! Input Mll or valid filename !!!")
+			# 		sys.exit()
+			# else:
+			# 	Mll = mll.copy()
 
-			assert( Mll.shape[0] >= lbins[-1]+1 )
+			# assert( Mll.shape[0] >= lbins[-1]+1 )
 
-			# Bin the coupling matrix
-			Bin = Binner(bin_edges=lbins)#, flat=prefact)
-			Mbb = np.dot(np.dot(Bin.P_bl, Mll), Bin.Q_lb)
+			# # Bin the coupling matrix
+			# Bin = Binner(bin_edges=lbins)#, flat=prefact)
+			# Mbb = np.dot(np.dot(Bin.P_bl, Mll), Bin.Q_lb)
 
 		lb, cl = self.Bin2DSpectra(fft2d, lbins=lbins, delta_ell=delta_ell, prefact=prefact, lmin=lmin, lmax=lmax, lxmin=lxmin, lxmax=lxmax, lymin=lymin, lymax=lymax)
 
 		if MASTER:
-			cb = np.dot(pinv2(Mbb), cl)
+			# cb = np.dot(pinv2(Mbb), cl)
+			cb = cl
 		else:
 			cb = cl
 
